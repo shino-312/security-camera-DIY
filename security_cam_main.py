@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import cv2
 import time
 import datetime
@@ -5,14 +6,15 @@ import os
 from collections import deque
 
 # Configuration
-VIDEO_DEVICE_INDEX = 2
-OUTPUT_BASE_DIR = './captures'
+VIDEO_DEVICE_INDEX = 0
+# OUTPUT_BASE_DIR = './captures'
+OUTPUT_BASE_DIR = '/media/shinji/3ABD-D198/captures'
 EVENT_DIR = os.path.join(OUTPUT_BASE_DIR, 'event')      # 動画保存先
 CONSTANT_DIR = os.path.join(OUTPUT_BASE_DIR, 'constant') # 静止画保存先
 WAIT_AFTER_LAUNCH = 10 #[s]
 
 # Motion Detection Config
-MIN_AREA = 500
+MIN_AREA = 3000
 RECORD_DURATION = 10       # 検知後の動画録画時間[s]
 COMPARE_DELAYS = [1.0, 3.0, 5.0] #[s]
 BUFFER_DURATION = 6.0 #[s]
@@ -112,7 +114,7 @@ def main():
                         if area < MIN_AREA:
                             continue
                         motion_detected = True
-                        #print("area=",area)
+                        print("motion detected area=",area)
                         break 
                     
                     if motion_detected: break
