@@ -14,13 +14,13 @@ CONSTANT_DIR = os.path.join(OUTPUT_BASE_DIR, 'constant') # 静止画保存先
 WAIT_AFTER_LAUNCH = 10 #[s]
 
 # Motion Detection Config
-MIN_AREA = 3000
+MIN_AREA = 5000
 RECORD_DURATION = 10       # 検知後の動画録画時間[s]
 COMPARE_DELAYS = [1.0, 3.0, 5.0] #[s]
 BUFFER_DURATION = 6.0 #[s]
 
 # Constant Capture Config
-CONSTANT_FPS = 1.0          # 常時保存する静止画のFPS（1秒に1枚）
+CONSTANT_FPS = 0.3          # 常時保存する静止画のFPS
 CONSTANT_INTERVAL = 1.0 / CONSTANT_FPS
 
 def get_past_frame(buffer, seconds_ago):
@@ -74,27 +74,21 @@ def main():
             
             current_time = time.time()
 
-            # --- 1. 常時静止画保存ロジック ---
-            if current_time - last_constant_save_time >= CONSTANT_INTERVAL:
-                timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = os.path.join(CONSTANT_DIR, f"img_{timestamp_str}.jpg")
-                
-                # ディスクI/Oの負荷を考慮し、非同期または別スレッドにするのが理想ですが
-                # 1FPS程度ならメインループ内でも許容範囲です
-                cv2.imwrite(filename, frame)
-                last_constant_save_time = current_time
-                # print(f"Saved constant image: {filename}") # ログがうるさくなるのでコメントアウト
-
-            # --- 2. 前処理 & バッファリング ---
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray = cv2.GaussianBlur(gray, (21, 21), 0)
+            #gray = cv2.GaussianBlur(gray, (21, 21), 0)
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            gray = clahe.apply(gray)
+            frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
             frame_buffer.append((current_time, frame, gray))
+
+            # --- 2. 前処理 & バッファリング ---
             while frame_buffer and (current_time - frame_buffer[0][0] > BUFFER_DURATION):
                 frame_buffer.popleft()
 
             # --- 3. 動体検知ロジック ---
             motion_detected = False
+            area = 0
             
             # バッファが溜まっており、比較対象がある場合のみ実行
             if (current_time - start_time) > WAIT_AFTER_LAUNCH:
@@ -105,7 +99,6 @@ def main():
                     delta = cv2.absdiff(past_gray, gray)
                     thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
                     thresh = cv2.dilate(thresh, None, iterations=2)
-                    #cv2.imshow("thresh", thresh)
                     
                     contours, _ = cv2.findContours(thresh.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                     
@@ -119,7 +112,16 @@ def main():
                     
                     if motion_detected: break
 
-            # --- 4. イベント録画制御 ---
+            # --- 検知情報画面表示 ---
+            status = "REC" if is_recording else "MONITOR"
+            color = (0, 0, 255) if is_recording else (0, 255, 0)
+            cv2.putText(frame, f"{status}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+            cv2.putText(frame, f"{area:.0f}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+            now = datetime.datetime.now()
+            date_str = now.strftime("%Y/%m/%d %H:%M:%S")
+            cv2.putText(frame, date_str, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1)
+
+            # --- イベント録画制御 ---
             if motion_detected:
                 print(f"Motion Detected! Recording until {current_time + RECORD_DURATION:.0f}")
                 recording_end_time = current_time + RECORD_DURATION
@@ -127,8 +129,8 @@ def main():
                 if not is_recording:
                     is_recording = True
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    video_filename = os.path.join(EVENT_DIR, f"event_{timestamp}.avi")
-                    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+                    video_filename = os.path.join(EVENT_DIR, f"event_{timestamp}.mp4")
+                    fourcc = cv2.VideoWriter_fourcc(*'H264')
                     h, w = frame.shape[:2]
                     video_writer = cv2.VideoWriter(video_filename, fourcc, 20.0, (w, h))
                     print(f"Start Recording Video: {video_filename}")
@@ -145,10 +147,19 @@ def main():
                     video_writer.release()
                     video_writer = None
 
-            # --- 5. 画面表示 ---
-            status = "REC" if is_recording else "MONITOR"
-            color = (0, 0, 255) if is_recording else (0, 255, 0)
-            cv2.putText(frame, f"{status}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+            # --- 静止画保存 ---
+            if current_time - last_constant_save_time >= CONSTANT_INTERVAL:
+            #if motion_detected and (current_time - last_constant_save_time >= CONSTANT_INTERVAL):
+                date_dir = now.strftime("%Y%m%d")
+                hour_dir = now.strftime("%H")
+                save_dir = os.path.join(CONSTANT_DIR, date_dir, hour_dir)
+                os.makedirs(save_dir, exist_ok=True)
+
+                timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = os.path.join(save_dir, f"img_{timestamp_str}-{area:.0f}.jpg")
+                cv2.imwrite(filename, frame)
+                last_constant_save_time = current_time
+
             cv2.imshow("Security Feed", frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
