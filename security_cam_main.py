@@ -128,8 +128,13 @@ def main():
 
                 if not is_recording:
                     is_recording = True
+                    date_dir = now.strftime("%Y%m%d")
+                    hour_dir = now.strftime("%H")
+                    save_dir = os.path.join(EVENT_DIR, date_dir, hour_dir)
+                    os.makedirs(save_dir, exist_ok=True)
+
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    video_filename = os.path.join(EVENT_DIR, f"event_{timestamp}.mp4")
+                    video_filename = os.path.join(save_dir, f"event_{timestamp}.mp4")
                     fourcc = cv2.VideoWriter_fourcc(*'H264')
                     h, w = frame.shape[:2]
                     video_writer = cv2.VideoWriter(video_filename, fourcc, 20.0, (w, h))
