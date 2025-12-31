@@ -14,7 +14,7 @@ CONSTANT_DIR = os.path.join(OUTPUT_BASE_DIR, 'constant') # 静止画保存先
 WAIT_AFTER_LAUNCH = 10 #[s]
 
 # Motion Detection Config
-MIN_AREA = 5000
+MIN_AREA = 12000
 RECORD_DURATION = 10       # 検知後の動画録画時間[s]
 COMPARE_DELAYS = [1.0, 3.0, 5.0] #[s]
 BUFFER_DURATION = 6.0 #[s]
@@ -165,12 +165,20 @@ def main():
                 cv2.imwrite(filename, frame)
                 last_constant_save_time = current_time
 
-            cv2.imshow("Security Feed", frame)
+            if motion_detected:
+                date_dir = now.strftime("%Y%m%d")
+                hour_dir = now.strftime("%H")
+                save_dir = os.path.join(EVENT_DIR, date_dir, hour_dir)
+                os.makedirs(save_dir, exist_ok=True)
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+                timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = os.path.join(save_dir, f"img_{timestamp_str}-{area:.0f}.jpg")
+                cv2.imwrite(filename, frame)
+
             
-            time.sleep(0.1) # ループを回すため少し短くしました
+            cv2.imshow("Security Feed", frame)
+            cv2.waitKey(1)
+            time.sleep(0.5)
 
     finally:
         if video_writer is not None:
