@@ -14,7 +14,7 @@ CONSTANT_DIR = os.path.join(OUTPUT_BASE_DIR, 'constant') # 静止画保存先
 WAIT_AFTER_LAUNCH = 10 #[s]
 
 # Motion Detection Config
-MIN_AREA = 12000
+MIN_AREA = 7000
 RECORD_DURATION = 10       # 検知後の動画録画時間[s]
 COMPARE_DELAYS = [1.0, 3.0, 5.0] #[s]
 BUFFER_DURATION = 6.0 #[s]
@@ -22,6 +22,28 @@ BUFFER_DURATION = 6.0 #[s]
 # Constant Capture Config
 CONSTANT_FPS = 0.3          # 常時保存する静止画のFPS
 CONSTANT_INTERVAL = 1.0 / CONSTANT_FPS
+
+def is_night_mode(frame, threshold=10):
+    """
+    画像の彩度(Saturation)を計算し、夜間（モノクロ/IR）かどうか判定する
+    threshold: 閾値（環境によりますが、10〜30くらいが目安）
+    return: True(夜間/IR), False(昼間/RGB)
+    """
+    # 1. BGR画像をHSV色空間に変換
+    # H: 色相, S: 彩度, V: 明度
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # 2. 彩度(S)チャンネルを取り出す (インデックス1)
+    s_channel = hsv[:, :, 1]
+
+    # 3. 彩度の平均値を計算
+    saturation_mean = s_channel.mean()
+
+    # デバッグ用に現在の彩度値を表示してみると調整しやすいです
+    # print(f"Current Saturation: {saturation_mean:.2f}")
+
+    # 4. 判定
+    return (saturation_mean, saturation_mean < threshold)
 
 def get_past_frame(buffer, seconds_ago):
     """バッファから指定秒数前のフレーム（グレー）を検索"""
@@ -58,6 +80,7 @@ def main():
 
     # 状態管理変数
     is_recording = False
+    is_night = False
     recording_end_time = 0
     video_writer = None
     last_constant_save_time = 0
@@ -72,13 +95,18 @@ def main():
             if not ret:
                 break
             
+            sat, is_night = is_night_mode(frame)
+
             current_time = time.time()
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            #gray = cv2.GaussianBlur(gray, (21, 21), 0)
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-            gray = clahe.apply(gray)
-            frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+            if is_night:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+                gray = clahe.apply(gray)
+                frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+            else:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                gray = cv2.GaussianBlur(gray, (21, 21), 0)
 
             frame_buffer.append((current_time, frame, gray))
 
@@ -116,7 +144,7 @@ def main():
             status = "REC" if is_recording else "MONITOR"
             color = (0, 0, 255) if is_recording else (0, 255, 0)
             cv2.putText(frame, f"{status}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-            cv2.putText(frame, f"{area:.0f}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+            cv2.putText(frame, f"{area:.0f}, {sat:.0f}, {is_night}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1)
             now = datetime.datetime.now()
             date_str = now.strftime("%Y/%m/%d %H:%M:%S")
             cv2.putText(frame, date_str, (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1)
@@ -144,6 +172,15 @@ def main():
                     for _, past_bgr, _ in frame_buffer:
                         video_writer.write(past_bgr)
 
+                    date_dir = now.strftime("%Y%m%d")
+                    hour_dir = now.strftime("%H")
+                    save_dir = os.path.join(EVENT_DIR, date_dir, hour_dir)
+                    os.makedirs(save_dir, exist_ok=True)
+
+                    timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = os.path.join(save_dir, f"img_{timestamp_str}-{area:.0f}.jpg")
+                    cv2.imwrite(filename, frame)
+
             if is_recording:
                 video_writer.write(frame)
                 if current_time > recording_end_time:
@@ -154,7 +191,6 @@ def main():
 
             # --- 静止画保存 ---
             if current_time - last_constant_save_time >= CONSTANT_INTERVAL:
-            #if motion_detected and (current_time - last_constant_save_time >= CONSTANT_INTERVAL):
                 date_dir = now.strftime("%Y%m%d")
                 hour_dir = now.strftime("%H")
                 save_dir = os.path.join(CONSTANT_DIR, date_dir, hour_dir)
@@ -164,17 +200,6 @@ def main():
                 filename = os.path.join(save_dir, f"img_{timestamp_str}-{area:.0f}.jpg")
                 cv2.imwrite(filename, frame)
                 last_constant_save_time = current_time
-
-            if motion_detected:
-                date_dir = now.strftime("%Y%m%d")
-                hour_dir = now.strftime("%H")
-                save_dir = os.path.join(EVENT_DIR, date_dir, hour_dir)
-                os.makedirs(save_dir, exist_ok=True)
-
-                timestamp_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = os.path.join(save_dir, f"img_{timestamp_str}-{area:.0f}.jpg")
-                cv2.imwrite(filename, frame)
-
             
             cv2.imshow("Security Feed", frame)
             cv2.waitKey(1)
